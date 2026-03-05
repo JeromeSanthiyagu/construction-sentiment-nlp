@@ -1,9 +1,10 @@
-pandas
 numpy
-scikit-learn
-nltk
-streamlit
 matplotlib
 wordcloud
 plotly
 seaborn
+streamlit==1.30.0
+altair==4.2.2
+pandas
+scikit-learn
+nltk
