@@ -5,7 +5,8 @@ from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.svm import OneClassSVM
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 import re
 
@@ -49,26 +50,36 @@ def train_model():
     # Split data
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # Model Training
-    print("Training model...")
-    model = LogisticRegression()
-    model.fit(X_train, y_train)
+    # Model Training - Naive Bayes for Sentiment
+    print("Training Multinomial Naive Bayes model...")
+    nb_model = MultinomialNB()
+    nb_model.fit(X_train, y_train)
 
     # Evaluation
-    print("Evaluating model...")
-    y_pred = model.predict(X_test)
+    print("Evaluating Sentiment model...")
+    y_pred = nb_model.predict(X_test)
     accuracy = accuracy_score(y_test, y_pred)
     print(f"Accuracy: {accuracy:.2f}")
     print("Classification Report:")
     print(classification_report(y_test, y_pred))
 
-    # Save model and vectorizer
-    print("Saving model...")
+    # Model Training - One-Class SVM for Anomaly Detection
+    # Using the entire dataset or just normal behavior? 
+    # Usually OCSVM is trained on the entire feature set to find outliers.
+    print("Training One-Class SVM for anomaly detection...")
+    # Use a linear kernel for TF-IDF (high dimensional, sparse) and nu=0.01 to minimize false positives
+    ocsvm_model = OneClassSVM(nu=0.01, kernel="linear")
+    ocsvm_model.fit(X) # Fit on all data
+
+    # Save models and vectorizer
+    print("Saving models...")
     with open('sentiment_model.pkl', 'wb') as f:
-        pickle.dump(model, f)
+        pickle.dump(nb_model, f)
+    with open('anomaly_model.pkl', 'wb') as f:
+        pickle.dump(ocsvm_model, f)
     with open('tfidf_vectorizer.pkl', 'wb') as f:
         pickle.dump(tfidf, f)
-    print("Model saved to sentiment_model.pkl and tfidf_vectorizer.pkl")
+    print("Models saved to sentiment_model.pkl, anomaly_model.pkl, and tfidf_vectorizer.pkl")
 
 if __name__ == "__main__":
     train_model()

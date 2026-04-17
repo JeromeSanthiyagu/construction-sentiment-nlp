@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 import nltk
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
+from textblob import TextBlob
 
 # Load NLTK data (ensure it's available)
 nltk.download('stopwords', quiet=True)
@@ -26,13 +27,15 @@ def load_model():
     try:
         with open('sentiment_model.pkl', 'rb') as f:
             model = pickle.load(f)
+        with open('anomaly_model.pkl', 'rb') as f:
+            anomaly_model = pickle.load(f)
         with open('tfidf_vectorizer.pkl', 'rb') as f:
             vectorizer = pickle.load(f)
-        return model, vectorizer
+        return model, anomaly_model, vectorizer
     except FileNotFoundError:
-        return None, None
+        return None, None, None
 
-model, vectorizer = load_model()
+model, anomaly_model, vectorizer = load_model()
 
 def preprocess_text(text):
     text = text.lower()
@@ -49,9 +52,23 @@ def predict_sentiment(text):
         return None
     cleaned_text = preprocess_text(text)
     vectorized_text = vectorizer.transform([cleaned_text]).toarray()
+    if vectorized_text.sum() == 0:
+        return "Unknown"
     prediction = model.predict(vectorized_text)[0]
     return prediction
 
+def predict_anomaly(text):
+    if anomaly_model is None or vectorizer is None:
+        return None
+    cleaned_text = preprocess_text(text)
+    vectorized_text = vectorizer.transform([cleaned_text]).toarray()
+    if vectorized_text.sum() == 0:
+        return True # Gibberish is considered an anomaly
+    
+    # Use decision_function instead of predict to allow threshold adjustment
+    # Normal predict uses < 0. We relax to < -0.15 to avoid false positives on slight variations.
+    score = anomaly_model.decision_function(vectorized_text)[0]
+    return score < -0.15
 def generate_daily_summary(df, selected_date=None):
     """Generate AI-powered daily summary"""
     if selected_date is None:
@@ -154,14 +171,34 @@ if page == "Sentiment Analyzer":
         if st.button("Analyze Sentiment", type="primary"):
             if user_input:
                 prediction = predict_sentiment(user_input)
+                is_anomaly = predict_anomaly(user_input)
+                blob = TextBlob(user_input)
                 
                 st.subheader("Result:")
-                if prediction == "Positive":
-                    st.success(f"😊 Sentiment: **{prediction}**")
-                elif prediction == "Negative":
-                    st.error(f"😡 Sentiment: **{prediction}**")
-                else:
-                    st.warning(f"😐 Sentiment: **{prediction}**")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.markdown("**Naive Bayes Sentiment**")
+                    if prediction == "Positive":
+                        st.success(f"😊 **{prediction}**")
+                    elif prediction == "Negative":
+                        st.error(f"😡 **{prediction}**")
+                    elif prediction == "Unknown":
+                        st.warning(f"❓ **Unknown (No meaning)**")
+                    else:
+                        st.warning(f"😐 **{prediction}**")
+                
+                with col2:
+                    st.markdown("**TextBlob Analysis**")
+                    st.info(f"Polarity: {blob.sentiment.polarity:.2f}\n\nSubjectivity: {blob.sentiment.subjectivity:.2f}")
+                    
+                with col3:
+                    st.markdown("**OCSVM Anomaly Detection**")
+                    if is_anomaly:
+                        st.error("⚠️ **Anomaly Detected** (Unusual Note)")
+                    else:
+                        st.success("✅ **Normal Note**")
             else:
                 st.warning("Please enter some text.")
 
@@ -273,6 +310,35 @@ elif page == "Analytics Dashboard":
             st.pyplot(fig_wc)
         else:
             st.info(f"No {sentiment_type} notes found in the selected date range.")
+            
+        # Anomaly Detection Section
+        st.subheader("⚠️ Outlier & Anomaly Detection")
+        st.markdown("Identify unusual patterns or significantly different notes based on our One-Class SVM model.")
+        
+        if anomaly_model is not None and vectorizer is not None:
+            with st.spinner("Detecting anomalies..."):
+                # Clean text and predict anomalies for the filtered dataframe
+                cleaned_notes = filtered_df['Note'].apply(preprocess_text)
+                vectorized_notes = vectorizer.transform(cleaned_notes).toarray()
+                
+                # Check for empty vectors (gibberish)
+                empty_vectors = vectorized_notes.sum(axis=1) == 0
+                
+                # Get decision scores
+                scores = anomaly_model.decision_function(vectorized_notes)
+                
+                # Anomaly if empty OR score is very low
+                filtered_df['Is_Anomaly'] = empty_vectors | (scores < -0.15)
+                
+                anomaly_count = filtered_df['Is_Anomaly'].sum()
+                st.metric("Total Anomalies Detected", anomaly_count)
+                
+                if anomaly_count > 0:
+                    st.dataframe(filtered_df[filtered_df['Is_Anomaly']][['Date', 'Note', 'Sentiment']], use_container_width=True)
+                else:
+                    st.success("No significant anomalies detected in this date range.")
+        else:
+            st.warning("Anomaly model not found. Please train models first.")
 
 # PAGE 3: Daily Summary
 elif page == "Daily Summary":
