@@ -1,8 +1,12 @@
 import pandas as pd
 import pickle
 import nltk
+import re
+import numpy as np
+
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
+
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
 from sklearn.naive_bayes import MultinomialNB
@@ -15,40 +19,56 @@ nltk.download('stopwords')
 nltk.download('wordnet')
 nltk.download('omw-1.4')
 
+# Initialize analyzers
+vader = SentimentIntensityAnalyzer()
+
 def preprocess_text(text):
-    # Lowercase
     text = text.lower()
-    # Remove punctuation and numbers
     text = re.sub(r'[^a-zA-Z\s]', '', text)
-    # Tokenization (split by space)
+
     words = text.split()
-    # Remove stopwords
     stop_words = set(stopwords.words('english'))
     words = [word for word in words if word not in stop_words]
-    # Lemmatization
+
     lemmatizer = WordNetLemmatizer()
     words = [lemmatizer.lemmatize(word) for word in words]
+
     return " ".join(words)
+
+# Extract VADER + TextBlob features
+def extract_sentiment_features(text):
+    vader_score = vader.polarity_scores(text)['compound']
+
+    blob = TextBlob(text)
+    textblob_polarity = blob.sentiment.polarity
+    textblob_subjectivity = blob.sentiment.subjectivity
+
+    return [vader_score, textblob_polarity, textblob_subjectivity]
 
 def train_model():
     print("Loading data...")
-    try:
-        df = pd.read_csv('construction_notes.csv')
-    except FileNotFoundError:
-        print("Error: construction_notes.csv not found. Run generate_data.py first.")
-        return
+    df = pd.read_csv('construction_notes.csv')
 
     print("Preprocessing data...")
     df['Cleaned_Note'] = df['Note'].apply(preprocess_text)
 
-    # Feature Extraction
-    print("Extracting features...")
+    print("Extracting TF-IDF features...")
     tfidf = TfidfVectorizer(max_features=5000)
-    X = tfidf.fit_transform(df['Cleaned_Note']).toarray()
+    tfidf_features = tfidf.fit_transform(df['Cleaned_Note']).toarray()
+
+    print("Extracting VADER + TextBlob features...")
+    sentiment_features = np.array(
+        df['Cleaned_Note'].apply(extract_sentiment_features).tolist()
+    )
+
+    # Combine TF-IDF + VADER + TextBlob
+    X = np.hstack((tfidf_features, sentiment_features))
     y = df['Sentiment']
 
-    # Split data
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # Split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
 
     # Model Training - Naive Bayes for Sentiment
     print("Training Multinomial Naive Bayes model...")
